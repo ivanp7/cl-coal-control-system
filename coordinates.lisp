@@ -147,8 +147,11 @@
 (defmacro v* (scalar vec)
   `(map 'vector (lambda (e) (* e ,scalar)) ,vec))
 
+(defmacro v*e (vec1 vec2)
+  `(map 'vector #'* ,vec1 ,vec2))
+
 (defmacro v-dot (vec1 vec2)
-  `(reduce #'+ (map 'vector #'* ,vec1 ,vec2)))
+  `(reduce #'+ (v*e ,vec1 ,vec2)))
 
 (defmacro v-norm (vec)
   (let ((vec-value (gensym)))
@@ -162,3 +165,69 @@
         (vec2 (if crd2 (coordinates/get-vector crd2 :cartesian)
                   +null-vector+)))
     (v-norm (v- vec1 vec2))))
+
+;;; -------------------------------------------------------------------------
+
+(defun multiply-matrix3x3-by-vector3 (mat vec)
+  (vector
+   (+ (* (aref mat 0 0) (cartesian/x vec))
+      (* (aref mat 0 1) (cartesian/y vec))
+      (* (aref mat 0 2) (cartesian/z vec)))
+   
+   (+ (* (aref mat 1 0) (cartesian/x vec))
+      (* (aref mat 1 1) (cartesian/y vec))
+      (* (aref mat 1 2) (cartesian/z vec)))
+   
+   (+ (* (aref mat 2 0) (cartesian/x vec))
+      (* (aref mat 2 1) (cartesian/y vec))
+      (* (aref mat 2 2) (cartesian/z vec)))))
+
+(defun convert-quaternion-to-matrix3x3 (quat)
+  (let ((a (elt quat 0)) (b (elt quat 1)) (c (elt quat 2)) (d (elt quat 3)))
+    (let ((a^2 (* a a)) (b^2 (* b b)) (c^2 (* c c)) (d^2 (* d d))
+          (ab (* a b)) (ac (* a c)) (ad (* a d))
+          (bc (* b c)) (bd (* b d)) (cd (* c d)))
+      (let ((norm^2 (+ a^2 b^2 c^2 d^2)))
+        (make-array '(3 3) :element-type 'double-float
+                    :initial-contents
+                    (list (list (/ (+ a^2 b^2 (- c^2) (- d^2)) norm^2)
+                                (/ (* 2 (- bc ad)) norm^2)
+                                (/ (* 2 (+ ac bd)) norm^2))
+                          (list (/ (* 2 (+ bc ad)) norm^2)
+                                (/ (+ a^2 (- b^2) c^2 (- d^2)) norm^2)
+                                (/ (* 2 (- cd ab)) norm^2))
+                          (list (/ (* 2 (- bd ac)) norm^2)
+                                (/ (* 2 (+ ab cd)) norm^2)
+                                (/ (+ a^2 (- b^2) (- c^2) d^2) norm^2))))))))
+
+;;; -------------------------------------------------------------------------
+
+(defun invert-rotation-matrix (rot-matrix)
+  (when rot-matrix
+    (let ((inv-rot-matrix (make-array '(3 3) :element-type 'double-float)))
+      (setf (aref inv-rot-matrix 0 0) (aref rot-matrix 0 0)
+         (aref inv-rot-matrix 0 1) (aref rot-matrix 1 0)
+         (aref inv-rot-matrix 0 2) (aref rot-matrix 2 0)
+         (aref inv-rot-matrix 1 0) (aref rot-matrix 0 1)
+         (aref inv-rot-matrix 1 1) (aref rot-matrix 1 1)
+         (aref inv-rot-matrix 1 2) (aref rot-matrix 2 1)
+         (aref inv-rot-matrix 2 0) (aref rot-matrix 0 2)
+         (aref inv-rot-matrix 2 1) (aref rot-matrix 1 2)
+         (aref inv-rot-matrix 2 2) (aref rot-matrix 2 2))
+      inv-rot-matrix)))
+
+;;; -------------------------------------------------------------------------
+
+(defun rotate-coordinates-by-matrix (rot-matrix coord)
+  (if (null rot-matrix)
+      coord
+      (let* ((vec (coordinates/get-vector coord))
+             (rotated (coordinates
+                       :v (multiply-matrix3x3-by-vector3 rot-matrix vec))))
+        (coordinates/set-coordinate-system
+         rotated (coordinates/get-coordinate-system coord))
+        rotated)))
+
+(defun rotate-coordinates-by-quaternion (quat coord)
+  (rotate-coordinates-by-matrix (convert-quaternion-to-matrix3x3 quat)
+                                coord))

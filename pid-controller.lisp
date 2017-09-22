@@ -4,7 +4,7 @@
 
 (in-package #:robot-control-system)
 
-(defun pid-controller (&key (kp 0.0d0) (ki 0.0d0) (kd 0.0d0)
+(defun pid-controller (&key (value-type 'linear) (kp 0.0d0) (ki 0.0d0) (kd 0.0d0)
                          (initial-process-time 0.0d0)
                          (initial-process-value 0.0d0)
                          (initial-error-value 0.0d0)
@@ -17,6 +17,11 @@
         (previous-error-integral initial-error-integral)
         (previous-error-derivative initial-error-derivative))
     (lambda (process-time process-value setpoint)
+      (when (and (eql value-type 'angular)
+               (> (abs (- process-value setpoint)) pi))
+        (setf setpoint (if (> setpoint process-value)
+                        (- setpoint (* 2 pi))
+                        (+ setpoint (* 2 pi)))))
       (let* ((delta-t (- process-time previous-process-time))
              (error-value (- setpoint process-value))
              (error-integral (+ previous-error-integral

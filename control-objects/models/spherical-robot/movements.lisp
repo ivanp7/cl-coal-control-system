@@ -42,17 +42,19 @@
                (point/coordinates (sphere/get-endeffector-position
                                    target-ref-frame/world-p))))
              (line-v (v- new-pos-v current-pos-v))
-             (remaining-distance (v-norm line-v))
-             (direction-v (v* (/ remaining-distance) line-v)))
-        (sphere/set-endeffector-position
-         (if (<= remaining-distance step-distance)
-             new-pos
-             (let ((next-pos-v (v+ current-pos-v
-                                   (v* step-distance direction-v))))
-               (point (coordinates :v next-pos-v)
-                      target-ref-frame/world-p)))
-         target-ref-frame/world-p)
-        (< remaining-distance *sphere/position-error*)))))
+             (remaining-distance (v-norm line-v)))
+        (if (< remaining-distance *sphere/position-error*)
+            t
+            (let ((direction-v (v* (/ remaining-distance) line-v)))
+              (sphere/set-endeffector-position
+               (if (<= remaining-distance step-distance)
+                   new-pos
+                   (let ((next-pos-v (v+ current-pos-v
+                                         (v* step-distance direction-v))))
+                     (point (coordinates :v next-pos-v)
+                            target-ref-frame/world-p)))
+               target-ref-frame/world-p)
+              (< remaining-distance *sphere/position-error*)))))))
 
 ;;; -------------------------------------------------------------------------
 ;;; Rolling cycle motion
@@ -81,9 +83,9 @@
         (- pole-elev))))
 
 (defun sphere/get-rolling-cycle-motion-action
-    (azimuth stop-fn &optional (displacement-rule
-                                (sphere/cycle-motion/get-cos-rule)))
-  (let (pole-point)
+    (azimuth stop-fn &optional (displacement-rule-getter-fn
+                                (constantly #'sphere/cycle-motion/get-cos-rule)))
+  (let (pole-point displacement-rule)
     (simm/get-custom-motion-action
      :initial-fn
      (lambda (&rest args)
@@ -96,23 +98,26 @@
                (vector 1.0d0
                        azimuth
                        (let ((theta-threshold (- (/ pi 2)
-                                             *sphere/cycle-motion/theta-offset*)))
+                                             *sphere/cycle-motion/theta-offset*))
+                             (theta (spherical/theta ee-pos-v)))
                          (cond ((< (spherical/rho ee-pos-v)
                                    *sphere/position-error*)
                                 theta-threshold)
-                               ((> (spherical/theta ee-pos-v)
-                                   theta-threshold)
+                               ((> theta theta-threshold)
                                 theta-threshold)
-                               ((< (spherical/theta ee-pos-v)
-                                   (- theta-threshold))
+                               ((< theta (- theta-threshold))
                                 (- theta-threshold))
-                               (t (spherical/theta ee-pos-v)))))))
+                               (t theta))))))
          (setf pole-point
             (sphere/transform-reference-frame
              (point (coordinates :cs :spherical :v pole-v) t) nil))))
      :stop-test-fn
      (lambda (&rest args)
-       (declare (ignore args))
+       (let ((theta (sphere/cycle-motion/get-pole-theta
+                 pole-point azimuth)))
+         (let ((rule (funcall displacement-rule-getter-fn theta args)))
+           (when rule
+             (setf displacement-rule rule))))
        (and pole-point
           (let ((theta (sphere/cycle-motion/get-pole-theta
                     pole-point azimuth)))
@@ -131,7 +136,8 @@
      :final-fn
      (lambda (&rest args)
        (declare (ignore args))
-       (setf pole-point nil)))))
+       (setf pole-point nil
+          displacement-rule nil)))))
 
 ;;; -------------------------------------------------------------------------
 ;;; Quick stop motion
@@ -139,8 +145,7 @@
 (defun sphere/quick-stop/critical-velocity ()
   (let* ((coef (+ (* 1/2 (1+ *sphere/endeffector-inertia-coefficient*)
                      (/ *sphere/mass* *sphere/endeffector-mass*))
-                  (* 1/3 (expt (/ *sphere/endeffector-radius*
-                               *sphere/radius*) 2))
+                  (* 1/3 (expt *sphere/endeffector-relative-radius* 2))
                   (* 1/2 (expt (- 1 *sphere/max-endeffector-relative-displacement*)
                             2)))))
     (sqrt (/ (* (v-norm *simm/gravity-vector*)
@@ -149,11 +154,11 @@
           coef))))
 
 (defparameter *sphere/quick-stop/theta-offset* (* pi 5/180))
-(defparameter *sphere/quick-stop/velocity-threshold*
-  (/ (sphere/quick-stop/critical-velocity) 2))
+(defparameter *sphere/quick-stop/velocity-threshold* 1/2)
 
 (defun sphere/get-quick-stop-motion-action
-    (&optional (velocity-threshold *sphere/quick-stop/velocity-threshold*))
+    (&optional (velocity-threshold (* *sphere/quick-stop/velocity-threshold*
+                                      (sphere/quick-stop/critical-velocity))))
   (simm/get-custom-motion-action
    :stop-test-fn
    (lambda (&rest args)

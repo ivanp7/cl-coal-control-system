@@ -50,4 +50,9 @@
                        "control-scenario"
                        "simulink-mechanics"))
    (:file "control-objects/models/spherical-robot/movements"
+          :depends-on ("control-objects/models/spherical-robot/spherical-robot"))
+   
+   (:file "control-objects/models/spherical-robot/mechanisms/portal"
+          :depends-on ("control-objects/models/spherical-robot/spherical-robot"))
+   (:file "control-objects/models/spherical-robot/mechanisms/6SUR"
           :depends-on ("control-objects/models/spherical-robot/spherical-robot"))))
